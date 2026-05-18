@@ -1,0 +1,10 @@
+{
+  "name": "optional",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "name": "hello-imgui",
+      "features": ["opengl3-binding", "glfw-binding"]
+    }
+  ]
+}
