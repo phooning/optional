@@ -9,5 +9,3 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
 
 hello_imgui_add_app(optional src/main.cpp)
-
-target_link_libraries(optional PRIVATE glfw OpenGL::GL)
