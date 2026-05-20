@@ -19,6 +19,7 @@ private:
     float m_nativeScale = 1.0f;
     ImGuiID m_rootDockspaceId = 0;
     ImGuiStyle m_baseStyle;
+    bool m_rendering_frame = false;
 
     static void glfwErrorCallback(int error, const char* description);
     static void glfwWindowContentScaleCallback(GLFWwindow* window, float xscale, float yscale);
@@ -34,6 +35,7 @@ private:
     void frameBegin();
     void frame();
     void frameEnd();
+    void fullFrame();
     void recoverImGuiFrame();
 
     void drawMainMenu();

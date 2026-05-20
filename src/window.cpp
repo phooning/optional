@@ -9,6 +9,7 @@
 #include <imgui_impl_opengl3.h>
 #include "window.hpp"
 
+#include <cmath>
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +38,7 @@ void TradingWindow::initGLFW() {
     if (!glfwInit()) std::exit(1);
 
 #if defined(__APPLE__)
+    glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -49,7 +51,7 @@ void TradingWindow::initGLFW() {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
 
-    m_window = glfwCreateWindow(1600, 1000, "Trading Desk", nullptr, nullptr);
+    m_window = glfwCreateWindow(720, 480, "Trading Desk", nullptr, nullptr);
     if (!m_window) {
         glfwTerminate();
         std::exit(1);
@@ -97,6 +99,8 @@ void TradingWindow::initImGui() {
     m_baseStyle = style;
     applyStyle(1.25f);
 
+    rebuildFonts(false);
+
     ImGui_ImplGlfw_InitForOpenGL(m_window, true);
 
 #if defined(__APPLE__)
@@ -104,8 +108,6 @@ void TradingWindow::initImGui() {
 #else
     ImGui_ImplOpenGL3_Init("#version 130");
 #endif
-
-    rebuildFonts(false);
 }
 
 void TradingWindow::setupCallbacks() {
@@ -141,15 +143,19 @@ void TradingWindow::glfwWindowContentScaleCallback(GLFWwindow* window, float xsc
     auto* self = static_cast<TradingWindow*>(glfwGetWindowUserPointer(window));
     if (!self) return;
 
-    float oldScale = self->m_nativeScale;
-    self->m_nativeScale = std::max(xscale, yscale);
-    if (oldScale <= 0.0f || self->m_nativeScale <= 0.0f) return;
+    float newScale = std::max(xscale, yscale);
+    if (newScale <= 0.0f || std::abs(newScale - self->m_nativeScale) < 0.01f) return;
 
+    self->m_nativeScale = newScale;
     self->applyStyle(1.25f * self->m_nativeScale);
     self->rebuildFonts(true);
 }
 
-void TradingWindow::glfwWindowSizeCallback(GLFWwindow*, int, int) {}
+void TradingWindow::glfwWindowSizeCallback(GLFWwindow* window, int width, int height) {
+    auto* self = static_cast<TradingWindow*>(glfwGetWindowUserPointer(window));
+    if (self == nullptr || width <= 0 || height <= 0 || self->m_rendering_frame) return;
+    self->fullFrame();
+}
 void TradingWindow::glfwWindowPosCallback(GLFWwindow*, int, int) {}
 
 void TradingWindow::frameBegin() {
@@ -195,7 +201,9 @@ void TradingWindow::drawMainMenu() {
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Watchlist");
             ImGui::MenuItem("Options Chain");
+            ImGui::MenuItem("Options Calculator");
             ImGui::MenuItem("Vol Surface");
+
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -216,7 +224,7 @@ void TradingWindow::drawRootDockspace() {
         ImGui::DockBuilderSplitNode(m_rootDockspaceId, ImGuiDir_Left, 0.25f, &dockLeft, &dockRight);
 
         ImGui::DockBuilderDockWindow("Watchlist", dockLeft);
-        ImGui::DockBuilderDockWindow("Options Chain", dockRight);
+        ImGui::DockBuilderDockWindow("Options Calculator", dockRight);
         ImGui::DockBuilderFinish(m_rootDockspaceId);
         firstFrame = false;
     }
@@ -242,10 +250,10 @@ void TradingWindow::drawPanels() {
     ImGui::End();
 
     if (dockspaceId != 0) ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Options Chain");
-    ImGui::TextUnformatted("Main trading desk area here.");
+    ImGui::Begin("Options Calculator");
+    ImGui::TextUnformatted("Options Calculator");
     ImGui::Separator();
-    ImGui::TextUnformatted("Options chain");
+    ImGui::TextUnformatted("Options calculator content");
     ImGui::End();
 }
 
@@ -270,15 +278,28 @@ void TradingWindow::recoverImGuiFrame() {
     }
 }
 
+void TradingWindow::fullFrame() {
+    m_rendering_frame = true;
+    try {
+        frameBegin();
+        frame();
+        frameEnd();
+    }
+    catch (...) {
+        recoverImGuiFrame();
+        m_rendering_frame = false;
+        throw;
+    }
+    m_rendering_frame = false;
+}
+
 void TradingWindow::run() {
     int consecutiveFrameExceptions = 0;
 
     while (!glfwWindowShouldClose(m_window)) {
         try {
             glfwPollEvents();
-            frameBegin();
-            frame();
-            frameEnd();
+            fullFrame();
             consecutiveFrameExceptions = 0;
         } catch (const std::exception& exception) {
             recoverImGuiFrame();
