@@ -7,7 +7,6 @@
 #include <cstring>
 #include <cmath>
 #include <cstdio>
-#include <cstddef>
 #include <imgui.h>
 #include <implot.h>
 #include <vector>
@@ -17,6 +16,7 @@ namespace {
 
 constexpr double kTradingDaysPerYear = 365.0;
 constexpr double kSqrtTwo = 1.4142135623730951;
+constexpr double kLongCallPayoffAngleRadians = 0.5235987755982989;
 
 double NormalCdf(double value) {
     return 0.5 * std::erfc(-value / kSqrtTwo);
@@ -38,6 +38,10 @@ double LongCallExpirationProfit(double spot, double strike, double premium, doub
     return (std::max(0.0, spot - strike) - premium) * contractShares;
 }
 
+double ClampDouble(double value, double minValue, double maxValue) {
+    return std::min(std::max(value, minValue), maxValue);
+}
+
 double LongCallTheoreticalProfit(
     double spot,
     double strike,
@@ -49,20 +53,6 @@ double LongCallTheoreticalProfit(
 ) {
     const double yearsToExpiry = std::max(0.0, daysToExpiry) / kTradingDaysPerYear;
     return (BlackScholesCall(spot, strike, yearsToExpiry, volatility, riskFreeRate) - premium) * contractShares;
-}
-
-int FindClosestPointIndex(const std::vector<double>& xs, double targetX) {
-    if (xs.empty()) {
-        return -1;
-    }
-
-    auto it = std::lower_bound(xs.begin(), xs.end(), targetX);
-    size_t idx = static_cast<size_t>(it - xs.begin());
-    if (idx > 0 && (idx == xs.size() || std::abs(xs[idx] - targetX) > std::abs(xs[idx - 1] - targetX))) {
-        --idx;
-    }
-
-    return static_cast<int>(idx);
 }
 
 void DrawResultRow(const char* label, const char* value) {
@@ -240,9 +230,65 @@ void DrawLongCallCalculator() {
         winningPayoffY.insert(winningPayoffY.begin(), 0.0);
     }
 
-    if (ImPlot::BeginPlot("Long Call P/L", ImVec2(-1.0f, 1080.0f), ImPlotFlags_Crosshairs)) {
+    const ImVec2 requestedPlotSize = ImVec2(-1.0f, 1080.0f);
+    const float plotWidthEstimate = std::max(1.0f, requestedPlotSize.x > 0.0f ? requestedPlotSize.x : ImGui::GetContentRegionAvail().x);
+    const float plotHeightEstimate = std::max(1.0f, requestedPlotSize.y > 0.0f ? requestedPlotSize.y : 360.0f);
+
+    static double linkedXMin = 0.0;
+    static double linkedXMax = 0.0;
+    static double linkedYMin = 0.0;
+    static double linkedYMax = 0.0;
+    static double previousStrikePrice = -1.0;
+    static double previousPremium = -1.0;
+    static int previousContracts = -1;
+    static int previousSharesPerContract = -1;
+
+    const bool resetPlotScale =
+        linkedXMax <= linkedXMin ||
+        std::abs(previousStrikePrice - strikePrice) > 0.001 ||
+        std::abs(previousPremium - premium) > 0.001 ||
+        previousContracts != contracts ||
+        previousSharesPerContract != sharesPerContract;
+
+    if (resetPlotScale) {
+        linkedXMin = xMin;
+        linkedXMax = xMax;
+        previousStrikePrice = strikePrice;
+        previousPremium = premium;
+        previousContracts = contracts;
+        previousSharesPerContract = sharesPerContract;
+    }
+
+    linkedXMin = ClampDouble(linkedXMin, xMin, xMax - 0.01);
+    linkedXMax = ClampDouble(linkedXMax, linkedXMin + 0.01, xMax);
+
+    const double visibleXRange = std::max(0.01, linkedXMax - linkedXMin);
+    const double targetYRange = contractShares * visibleXRange * static_cast<double>(plotHeightEstimate) /
+        (static_cast<double>(plotWidthEstimate) * std::tan(kLongCallPayoffAngleRadians));
+    const double visiblePayoffMin = std::min(
+        LongCallExpirationProfit(linkedXMin, strikePrice, premium, contractShares),
+        LongCallExpirationProfit(linkedXMax, strikePrice, premium, contractShares)
+    );
+    const double visiblePayoffMax = std::max(
+        LongCallExpirationProfit(linkedXMin, strikePrice, premium, contractShares),
+        LongCallExpirationProfit(linkedXMax, strikePrice, premium, contractShares)
+    );
+    const double visibleYMin = std::min(-totalPremium, visiblePayoffMin);
+    const double visibleYMax = std::max(0.0, visiblePayoffMax);
+    const double yPadding = targetYRange * 0.04;
+    const double neededYRange = std::max(targetYRange, (visibleYMax - visibleYMin) + (yPadding * 2.0));
+    linkedYMin = visibleYMin - yPadding;
+    linkedYMax = linkedYMin + neededYRange;
+    if (linkedYMax < visibleYMax + yPadding) {
+        linkedYMax = visibleYMax + yPadding;
+        linkedYMin = linkedYMax - neededYRange;
+    }
+
+    if (ImPlot::BeginPlot("Long Call P/L", requestedPlotSize, ImPlotFlags_Crosshairs)) {
         ImPlot::SetupAxes("Underlying Price", "Profit / Loss");
-        ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Once);
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, xMin, xMax);
+        ImPlot::SetupAxisLinks(ImAxis_X1, &linkedXMin, &linkedXMax);
+        ImPlot::SetupAxisLinks(ImAxis_Y1, &linkedYMin, &linkedYMax);
 
         const ImVec4 lossColor = ImVec4(0.95f, 0.25f, 0.25f, 1.0f);
         const ImVec4 profitColor = ImVec4(0.25f, 0.78f, 0.42f, 1.0f);
@@ -330,47 +376,44 @@ void DrawLongCallCalculator() {
 
         if (ImPlot::IsPlotHovered()) {
             const ImPlotPoint mousePosition = ImPlot::GetPlotMousePos();
-            const int cursorIndex = FindClosestPointIndex(underlyingPrices, mousePosition.x);
-            if (cursorIndex >= 0) {
-                const double snappedX = underlyingPrices[static_cast<size_t>(cursorIndex)];
-                const double snappedY = expirationProfit[static_cast<size_t>(cursorIndex)];
-                const ImVec4 cursorColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+            const double snappedX = ClampDouble(mousePosition.x, xMin, xMax);
+            const double snappedY = LongCallExpirationProfit(snappedX, strikePrice, premium, contractShares);
+            const ImVec4 cursorColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 
-                ImPlot::PlotInfLines(
-                    "Cursor snap##LongCallCursorLine",
-                    &snappedX,
-                    1,
-                    {
-                        ImPlotProp_LineColor, cursorColor,
-                        ImPlotProp_LineWeight, 1.5f,
-                        ImPlotProp_Flags, ImPlotItemFlags_NoLegend
-                    }
-                );
-                ImPlot::PlotScatter(
-                    "Cursor snap##LongCallCursorPoint",
-                    &snappedX,
-                    &snappedY,
-                    1,
-                    {
-                        ImPlotProp_Marker, ImPlotMarker_Circle,
-                        ImPlotProp_MarkerSize, 8.0f,
-                        ImPlotProp_MarkerFillColor, cursorColor,
-                        ImPlotProp_MarkerLineColor, cursorColor,
-                        ImPlotProp_Flags, ImPlotItemFlags_NoLegend
-                    }
-                );
-                ImPlot::Annotation(
-                    snappedX,
-                    snappedY,
-                    cursorColor,
-                    ImVec2(10.0f, -22.0f),
-                    true,
-                    "Spot $%.2f\nExpiration P/L $%.2f",
-                    snappedX,
-                    snappedY
-                );
-                ImGui::SetTooltip("Payoff at expiration\nUnderlying: $%.2f\nP/L: $%.2f", snappedX, snappedY);
-            }
+            ImPlot::PlotInfLines(
+                "Cursor snap##LongCallCursorLine",
+                &snappedX,
+                1,
+                {
+                    ImPlotProp_LineColor, cursorColor,
+                    ImPlotProp_LineWeight, 1.5f,
+                    ImPlotProp_Flags, ImPlotItemFlags_NoLegend
+                }
+            );
+            ImPlot::PlotScatter(
+                "Cursor snap##LongCallCursorPoint",
+                &snappedX,
+                &snappedY,
+                1,
+                {
+                    ImPlotProp_Marker, ImPlotMarker_Circle,
+                    ImPlotProp_MarkerSize, 8.0f,
+                    ImPlotProp_MarkerFillColor, cursorColor,
+                    ImPlotProp_MarkerLineColor, cursorColor,
+                    ImPlotProp_Flags, ImPlotItemFlags_NoLegend
+                }
+            );
+            ImPlot::Annotation(
+                snappedX,
+                snappedY,
+                cursorColor,
+                ImVec2(10.0f, -22.0f),
+                true,
+                "Spot $%.2f\nExpiration P/L $%.2f",
+                snappedX,
+                snappedY
+            );
+            ImGui::SetTooltip("Payoff at expiration\nUnderlying: $%.2f\nP/L: $%.2f", snappedX, snappedY);
         }
 
         ImPlot::EndPlot();
