@@ -40,5 +40,4 @@ private:
 
     void drawMainMenu();
     void drawRootDockspace();
-    void drawPanels();
 };

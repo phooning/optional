@@ -7,6 +7,8 @@
 #include <imgui_internal.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include <implot.h>
+#include "panels.hpp"
 #include "window.hpp"
 
 #include <cmath>
@@ -24,6 +26,7 @@ TradingWindow::TradingWindow() {
 TradingWindow::~TradingWindow() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
     glfwDestroyWindow(m_window);
     glfwTerminate();
@@ -86,6 +89,7 @@ void TradingWindow::initGLFW() {
 void TradingWindow::initImGui() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlot::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
@@ -233,28 +237,7 @@ void TradingWindow::drawRootDockspace() {
 }
 
 void TradingWindow::frame() {
-    drawPanels();
-}
-
-void TradingWindow::drawPanels() {
-    ImGuiID dockspaceId = m_rootDockspaceId;
-
-    // === Panels with automatic docking on first run ===
-    if (dockspaceId != 0) ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Watchlist");
-    ImGui::TextUnformatted("Symbol");
-    ImGui::Separator();
-    ImGui::TextUnformatted("SPY");
-    ImGui::TextUnformatted("QQQ");
-    ImGui::TextUnformatted("IWM");
-    ImGui::End();
-
-    if (dockspaceId != 0) ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Options Calculator");
-    ImGui::TextUnformatted("Options Calculator");
-    ImGui::Separator();
-    ImGui::TextUnformatted("Options calculator content");
-    ImGui::End();
+    panels::Draw(m_rootDockspaceId);
 }
 
 void TradingWindow::frameEnd() {
