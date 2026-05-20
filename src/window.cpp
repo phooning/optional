@@ -1,6 +1,7 @@
 #include "hello_imgui/hello_imgui_include_opengl.h"
 
 #define GLFW_INCLUDE_NONE
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -56,6 +57,13 @@ void TradingWindow::initGLFW() {
 
     glfwMakeContextCurrent(m_window);
     glfwSwapInterval(1); // VSync (set to 0 for unlimited FPS)
+
+    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+        std::fprintf(stderr, "Failed to initialize OpenGL loader\n");
+        glfwDestroyWindow(m_window);
+        glfwTerminate();
+        std::exit(1);
+    }
 
 #if defined(HELLOIMGUI_USE_GLAD)
     if (gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) == 0) {
@@ -237,7 +245,7 @@ void TradingWindow::drawPanels() {
     ImGui::Begin("Options Chain");
     ImGui::TextUnformatted("Main trading desk area here.");
     ImGui::Separator();
-    ImGui::TextUnformatted("No more stretching on resize.");
+    ImGui::TextUnformatted("Options chain");
     ImGui::End();
 }
 
