@@ -238,6 +238,7 @@ void DrawLongCallCalculator() {
     static double linkedXMax = 0.0;
     static double linkedYMin = 0.0;
     static double linkedYMax = 0.0;
+    static double previousTargetYRange = 0.0;
     static double previousStrikePrice = -1.0;
     static double previousPremium = -1.0;
     static int previousContracts = -1;
@@ -262,6 +263,7 @@ void DrawLongCallCalculator() {
     linkedXMin = ClampDouble(linkedXMin, xMin, xMax - 0.01);
     linkedXMax = ClampDouble(linkedXMax, linkedXMin + 0.01, xMax);
 
+    const bool resetYScale = resetPlotScale || linkedYMax <= linkedYMin || previousTargetYRange <= 0.0;
     const double visibleXRange = std::max(0.01, linkedXMax - linkedXMin);
     const double targetYRange = contractShares * visibleXRange * static_cast<double>(plotHeightEstimate) /
         (static_cast<double>(plotWidthEstimate) * std::tan(kLongCallPayoffAngleRadians));
@@ -277,12 +279,20 @@ void DrawLongCallCalculator() {
     const double visibleYMax = std::max(0.0, visiblePayoffMax);
     const double yPadding = targetYRange * 0.04;
     const double neededYRange = std::max(targetYRange, (visibleYMax - visibleYMin) + (yPadding * 2.0));
-    linkedYMin = visibleYMin - yPadding;
-    linkedYMax = linkedYMin + neededYRange;
-    if (linkedYMax < visibleYMax + yPadding) {
-        linkedYMax = visibleYMax + yPadding;
-        linkedYMin = linkedYMax - neededYRange;
+
+    if (resetYScale) {
+        linkedYMin = visibleYMin - yPadding;
+        linkedYMax = linkedYMin + neededYRange;
+        if (linkedYMax < visibleYMax + yPadding) {
+            linkedYMax = visibleYMax + yPadding;
+            linkedYMin = linkedYMax - neededYRange;
+        }
+    } else {
+        const double currentYCenter = (linkedYMin + linkedYMax) * 0.5;
+        linkedYMin = currentYCenter - (neededYRange * 0.5);
+        linkedYMax = currentYCenter + (neededYRange * 0.5);
     }
+    previousTargetYRange = targetYRange;
 
     if (ImPlot::BeginPlot("Long Call P/L", requestedPlotSize, ImPlotFlags_Crosshairs)) {
         ImPlot::SetupAxes("Underlying Price", "Profit / Loss");
