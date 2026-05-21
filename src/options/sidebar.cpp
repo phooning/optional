@@ -1,128 +1,66 @@
 #include "sidebar.hpp"
 
+#include "strategy_registry.hpp"
+
+#include <array>
 #include <imgui.h>
+#include <vector>
 
 namespace options_calculator {
 namespace {
 
-constexpr const char* kBasic[] = {
-    "Long Call",
-    "Long Put",
-    "Covered Call",
-    "Cash-Secured Put",
+constexpr std::array<StrategyCategory, 12> kCategoryOrder = {
+    StrategyCategory::Basic,
+    StrategyCategory::CreditSpreads,
+    StrategyCategory::DebitSpreads,
+    StrategyCategory::Neutral,
+    StrategyCategory::CalendarSpreads,
+    StrategyCategory::Directional,
+    StrategyCategory::Other,
+    StrategyCategory::Naked,
+    StrategyCategory::Ladders,
+    StrategyCategory::RatioSpreads,
+    StrategyCategory::Synthetic,
+    StrategyCategory::Arbitrage,
 };
 
-constexpr const char* kCreditSpreads[] = {
-    "Protective Put",
-    "Bull Put Spread",
-};
+std::vector<const char*> StrategyNamesForCategory(StrategyCategory category) {
+    std::vector<const char*> names;
+    for (const StrategyTemplate* strategyTemplate : GetStrategiesByCategory(category)) {
+        names.push_back(strategyTemplate->name);
+    }
 
-constexpr const char* kDebitSpreads[] = {
-    "Bull Call Spread",
-    "Bear Put Spread",
-};
-
-constexpr const char* kNeutral[] = {
-    "Iron Butterfly",
-    "Iron Condor",
-    "Long Put Butterfly",
-    "Long Call Butterfly",
-    "Short Straddle",
-    "Short Strangle",
-    "Long Call Condor",
-    "Long Put Condor",
-    "Covered Short Straddle",
-    "Covered Short Strangle",
-};
-
-constexpr const char* kCalendarSpreads[] = {
-    "Calendar Call Spread",
-    "Calendar Put Spread",
-    "Diagonal Call Spread",
-    "Diagonal Put Spread",
-};
-
-constexpr const char* kDirectional[] = {
-    "Inverse Iron Butterfly",
-    "Inverse Iron Condor",
-    "Short Put Butterfly",
-    "Straddle",
-    "Strangle",
-    "Short Call Condor",
-    "Short Put Condor",
-};
-
-constexpr const char* kOther[] = {
-    "Collar",
-    "Jade Lizard",
-    "Reverse Jade Lizard",
-    "Strip",
-    "Strap",
-    "Guts",
-    "Short Guts",
-    "Double Diagonal",
-};
-
-constexpr const char* kNaked[] = {
-    "Short Put",
-    "Short Call",
-};
-
-constexpr const char* kLaddars[] = {
-    "Bull Call Laddar",
-    "Bear Call Ladder",
-    "Bull Put Ladder",
-    "Bear Put Laddar",
-};
-
-constexpr const char* kRatioSpreads[] = {
-    "Call Ratio Backspread",
-    "Put Broken Wing",
-    "Inverse Call Broken Wing",
-    "Put Ratio Backspread",
-    "Call Broken Wing",
-    "Inverse Put Broken Wing",
-    "Call Ratio Spread",
-    "Put Ratio Spread",
-};
-
-constexpr const char* kSynthetic[] = {
-    "Long Synthetic Future",
-    "Short Synthetic Future",
-    "Synthetic Put",
-};
-
-constexpr const char* kArbitrage[] = {
-    "Long Combo",
-    "Short Combo",
-};
-
-constexpr StrategyCategory kCategories[] = {
-    {"Basic", kBasic, IM_ARRAYSIZE(kBasic)},
-    {"Credit Spreads", kCreditSpreads, IM_ARRAYSIZE(kCreditSpreads)},
-    {"Debit Spreads", kDebitSpreads, IM_ARRAYSIZE(kDebitSpreads)},
-    {"Neutral", kNeutral, IM_ARRAYSIZE(kNeutral)},
-    {"Calendar Spreads", kCalendarSpreads, IM_ARRAYSIZE(kCalendarSpreads)},
-    {"Directional", kDirectional, IM_ARRAYSIZE(kDirectional)},
-    {"Other", kOther, IM_ARRAYSIZE(kOther)},
-    {"Naked", kNaked, IM_ARRAYSIZE(kNaked)},
-    {"Laddars", kLaddars, IM_ARRAYSIZE(kLaddars)},
-    {"Ratio Spreads", kRatioSpreads, IM_ARRAYSIZE(kRatioSpreads)},
-    {"Synthetic", kSynthetic, IM_ARRAYSIZE(kSynthetic)},
-    {"Arbitrage", kArbitrage, IM_ARRAYSIZE(kArbitrage)},
-};
+    return names;
+}
 
 } // namespace
 
 const char* DefaultStrategyName() {
-    return kBasic[0];
+    const std::vector<StrategyTemplate>& strategies = GetStrategyTemplates();
+    return strategies.empty() ? "" : strategies.front().name;
 }
 
-const StrategyCategory* StrategyCategories(int* categoryCount) {
-    if (categoryCount != nullptr) {
-        *categoryCount = IM_ARRAYSIZE(kCategories);
+const SidebarStrategyCategory* StrategyCategories(int* categoryCount) {
+    static std::array<std::vector<const char*>, kCategoryOrder.size()> entriesByCategory;
+    static std::array<SidebarStrategyCategory, kCategoryOrder.size()> sidebarCategories;
+    static bool initialized = false;
+
+    if (!initialized) {
+        for (std::size_t categoryIndex = 0; categoryIndex < kCategoryOrder.size(); ++categoryIndex) {
+            entriesByCategory[categoryIndex] = StrategyNamesForCategory(kCategoryOrder[categoryIndex]);
+            sidebarCategories[categoryIndex] = {
+                StrategyCategoryDisplayName(kCategoryOrder[categoryIndex]),
+                entriesByCategory[categoryIndex].data(),
+                static_cast<int>(entriesByCategory[categoryIndex].size())
+            };
+        }
+        initialized = true;
     }
-    return kCategories;
+
+    if (categoryCount != nullptr) {
+        *categoryCount = static_cast<int>(sidebarCategories.size());
+    }
+    return sidebarCategories.data();
 }
 
 void DrawStrategySidebar(const char** selectedStrategy) {
@@ -130,9 +68,13 @@ void DrawStrategySidebar(const char** selectedStrategy) {
     ImGui::Separator();
 
     int categoryCount = 0;
-    const StrategyCategory* categories = StrategyCategories(&categoryCount);
+    const SidebarStrategyCategory* categories = StrategyCategories(&categoryCount);
     for (int categoryIndex = 0; categoryIndex < categoryCount; ++categoryIndex) {
-        const StrategyCategory& category = categories[categoryIndex];
+        const SidebarStrategyCategory& category = categories[categoryIndex];
+        if (category.entryCount == 0) {
+            continue;
+        }
+
         if (!ImGui::CollapsingHeader(category.name, ImGuiTreeNodeFlags_DefaultOpen)) {
             continue;
         }

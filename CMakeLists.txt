@@ -12,8 +12,14 @@ find_package(OpenGL REQUIRED)
 hello_imgui_add_app(optional 
     src/main.cpp
     src/panels.cpp
+    src/options/option_math.cpp
     src/options/options_calculator.cpp
+    src/options/payoff_plot.cpp
     src/options/sidebar.cpp
+    src/options/strategy_eval.cpp
+    src/options/strategy_registry.cpp
+    src/options/strategy_types.cpp
+    src/options/strategy_ui.cpp
     src/window.cpp
 )
 
