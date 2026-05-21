@@ -2,6 +2,7 @@
 
 #include "payoff_plot.hpp"
 #include "strategy_eval.hpp"
+#include "utils.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -16,24 +17,6 @@ struct StrategySession {
     StrategyInstance strategy;
     MarketInputs market;
 };
-
-double ClampDouble(double value, double minValue, double maxValue) {
-    return std::min(std::max(value, minValue), maxValue);
-}
-
-std::string FormatCurrency(double value) {
-    char amount[64];
-    std::snprintf(amount, sizeof(amount), "%.2f", std::abs(value));
-
-    std::string formatted(amount);
-    const std::size_t decimalIndex = formatted.find('.');
-    const std::size_t integerEnd = decimalIndex == std::string::npos ? formatted.size() : decimalIndex;
-    for (std::size_t commaIndex = integerEnd; commaIndex > 3; commaIndex -= 3) {
-        formatted.insert(commaIndex - 3, ",");
-    }
-
-    return value < -0.005 ? "-$" + formatted : "$" + formatted;
-}
 
 std::string FormatOptionalCurrency(const std::optional<double>& value, const char* emptyText) {
     if (!value.has_value()) {
@@ -59,16 +42,62 @@ std::string FormatBreakevens(const std::vector<double>& breakevens) {
     return text;
 }
 
-void DrawResultRow(const char* label, const std::string& value) {
+std::string FormatNumber(double value) {
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "%.2f", value);
+    return buffer;
+}
+
+ImVec4 ProfitLossColor(double value) {
+    if (value > 0.005) {
+        return ImVec4(0.25f, 0.78f, 0.42f, 1.0f);
+    }
+    if (value < -0.005) {
+        return ImVec4(0.95f, 0.28f, 0.28f, 1.0f);
+    }
+    return ImGui::GetStyleColorVec4(ImGuiCol_Text);
+}
+
+void DrawMetricLabel(const char* label, const char* tooltip) {
+    ImGui::TextUnformatted(label);
+    if (tooltip != nullptr) {
+        ImGui::SetItemTooltip("%s", tooltip);
+    }
+}
+
+void DrawResultRow(const char* label, const std::string& value, const char* tooltip = nullptr) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(label);
+    DrawMetricLabel(label, tooltip);
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(value.c_str());
 }
 
-void DrawResultRow(const char* label, double value) {
-    DrawResultRow(label, FormatCurrency(value));
+void DrawCurrencyRow(const char* label, double value, const char* tooltip = nullptr, bool colorize = false) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    DrawMetricLabel(label, tooltip);
+    ImGui::TableNextColumn();
+    const std::string formatted = FormatCurrency(value);
+    if (colorize) {
+        ImGui::TextColored(ProfitLossColor(value), "%s", formatted.c_str());
+    } else {
+        ImGui::TextUnformatted(formatted.c_str());
+    }
+}
+
+void DrawNumberRow(const char* label, double value, const char* tooltip = nullptr) {
+    DrawResultRow(label, FormatNumber(value), tooltip);
+}
+
+void DrawPercentRow(const char* label, double value, const char* tooltip = nullptr) {
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "%.2f%%", value);
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    DrawMetricLabel(label, tooltip);
+    ImGui::TableNextColumn();
+    ImGui::TextColored(ProfitLossColor(value), "%s", buffer);
 }
 
 bool HasMultipleExpirations(const StrategyInstance& strategy) {
@@ -86,6 +115,35 @@ bool HasMultipleExpirations(const StrategyInstance& strategy) {
     }
 
     return false;
+}
+
+void ResetLegForInstrument(StrategyLeg& leg, InstrumentType instrumentType) {
+    leg.instrumentType = instrumentType;
+    leg.delta = 0.0;
+    leg.theta = 0.0;
+
+    if (instrumentType == InstrumentType::Stock) {
+        leg.optionType = OptionType::Call;
+        leg.premium = 0.0;
+        leg.currentMarketPremium = 0.0;
+        leg.useCurrentMarketPremium = false;
+        leg.daysToExpiry = 0;
+        return;
+    }
+
+    leg.optionType = OptionType::Call;
+    leg.premium = 0.0;
+    leg.currentMarketPremium = 0.0;
+    leg.useCurrentMarketPremium = false;
+    leg.daysToExpiry = 30;
+}
+
+const char* InstrumentDisplayName(const StrategyLeg& leg) {
+    if (leg.instrumentType == InstrumentType::Stock) {
+        return "Stock";
+    }
+
+    return leg.optionType == OptionType::Call ? "Call" : "Put";
 }
 
 StrategySession& SessionForTemplate(const StrategyTemplate& strategyTemplate) {
@@ -143,7 +201,10 @@ void DrawLegEditor(StrategyLeg& leg, int legIndex) {
 
         ImGui::SetNextItemWidth(130.0f);
         if (ImGui::Combo("Instrument", &selectedInstrument, instrumentItems, IM_ARRAYSIZE(instrumentItems))) {
-            leg.instrumentType = selectedInstrument == 0 ? InstrumentType::Stock : InstrumentType::Option;
+            const InstrumentType newInstrument = selectedInstrument == 0 ? InstrumentType::Stock : InstrumentType::Option;
+            if (newInstrument != leg.instrumentType) {
+                ResetLegForInstrument(leg, newInstrument);
+            }
         }
 
         if (leg.instrumentType == InstrumentType::Option) {
@@ -189,6 +250,35 @@ void DrawStrategyEditor(StrategyInstance& strategy) {
     ImGui::Separator();
 
     for (int legIndex = 0; legIndex < static_cast<int>(strategy.legs.size()); ++legIndex) {
+        bool reorderedLeg = false;
+        ImGui::PushID(legIndex);
+        if (ImGui::Button("^ Up") && legIndex > 0) {
+            std::swap(strategy.legs[legIndex], strategy.legs[legIndex - 1]);
+            reorderedLeg = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("v Down") && legIndex + 1 < static_cast<int>(strategy.legs.size())) {
+            std::swap(strategy.legs[legIndex], strategy.legs[legIndex + 1]);
+            reorderedLeg = true;
+        }
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.72f, 0.16f, 0.16f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.88f, 0.22f, 0.22f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.56f, 0.10f, 0.10f, 1.0f));
+        const bool removeLeg = ImGui::Button("x Remove");
+        ImGui::PopStyleColor(3);
+        ImGui::PopID();
+
+        if (removeLeg) {
+            strategy.legs.erase(strategy.legs.begin() + legIndex);
+            --legIndex;
+            continue;
+        }
+
+        if (reorderedLeg) {
+            continue;
+        }
+
         DrawLegEditor(strategy.legs[legIndex], legIndex);
     }
 
@@ -209,31 +299,86 @@ void DrawStrategyResults(const StrategyResult& result) {
         ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, 270.0f);
         ImGui::TableSetupColumn("Value");
 
-        DrawResultRow(result.netEntryCost >= 0.0 ? "Net debit" : "Net credit", std::abs(result.netEntryCost));
-        DrawResultRow("Current theoretical value", result.currentTheoreticalValue);
-        DrawResultRow("Current P/L", result.currentPL);
-        DrawResultRow("Intrinsic value", result.intrinsicValue);
-        DrawResultRow("Expiration P/L at current spot", result.expirationPLAtCurrentSpot);
+        DrawCurrencyRow(result.netEntryCost >= 0.0 ? "Net debit" : "Net credit", std::abs(result.netEntryCost));
+        DrawCurrencyRow("Current theoretical value", result.currentTheoreticalValue);
+        DrawCurrencyRow("Current P/L", result.currentPL, "Theoretical value today minus the original net entry cost.", true);
+        DrawCurrencyRow("Intrinsic value", result.intrinsicValue);
+        DrawCurrencyRow(
+            "Expiration P/L at current spot",
+            result.expirationPLAtCurrentSpot,
+            "Projected expiration profit or loss if the underlying stayed at the current price.",
+            true
+        );
         DrawResultRow("Breakevens", FormatBreakevens(result.breakevens));
         DrawResultRow("Max profit", FormatOptionalCurrency(result.maxProfit, "Unlimited"));
         DrawResultRow("Max loss", FormatOptionalCurrency(result.maxLoss, "Unlimited"));
 
         if (result.currentMarketValue.has_value()) {
-            DrawResultRow("Current mark", *result.currentMarketValue);
-            DrawResultRow("Mark-to-market P/L", *result.markToMarketPL);
-            DrawResultRow("Model edge", *result.modelEdge);
+            DrawCurrencyRow("Current mark", *result.currentMarketValue);
+            DrawCurrencyRow(
+                "Mark-to-market P/L",
+                *result.markToMarketPL,
+                "Current marked value minus the original net entry cost.",
+                true
+            );
+            DrawCurrencyRow(
+                "Model edge",
+                *result.modelEdge,
+                "Theoretical value today minus the current market mark.",
+                true
+            );
         } else {
             DrawResultRow("Current mark", "Not provided");
         }
 
-        std::string returnOnRisk = "N/A";
         if (result.maxLoss.has_value() && *result.maxLoss > 0.0) {
             const double risk = *result.maxLoss;
-            char buffer[64];
-            std::snprintf(buffer, sizeof(buffer), "%.2f%%", (result.currentPL / risk) * 100.0);
-            returnOnRisk = buffer;
+            DrawPercentRow(
+                "Return on risk",
+                (result.currentPL / risk) * 100.0,
+                "Current theoretical P/L divided by maximum loss."
+            );
+        } else {
+            DrawResultRow("Return on risk", "N/A", "Current theoretical P/L divided by maximum loss.");
         }
-        DrawResultRow("Return on risk", returnOnRisk);
+
+        DrawNumberRow("Delta", result.delta, "Estimated change in strategy value for a $1 underlying move.");
+        DrawNumberRow("Theta / day", result.theta, "Estimated one-calendar-day time decay, using Black-Scholes theta.");
+
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Greeks");
+    if (ImGui::BeginTable("LegGreeks", 4, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Leg", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn("Instrument", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableSetupColumn("Delta", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableSetupColumn("Theta / day", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableHeadersRow();
+
+        for (int legIndex = 0; legIndex < static_cast<int>(result.evaluatedLegs.size()); ++legIndex) {
+            const StrategyLeg& leg = result.evaluatedLegs[legIndex];
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Leg %d", legIndex + 1);
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(InstrumentDisplayName(leg));
+            ImGui::TableNextColumn();
+            ImGui::Text("%.2f", leg.delta);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.2f", leg.theta);
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Total");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Strategy");
+        ImGui::TableNextColumn();
+        ImGui::Text("%.2f", result.delta);
+        ImGui::TableNextColumn();
+        ImGui::Text("%.2f", result.theta);
 
         ImGui::EndTable();
     }
@@ -243,6 +388,10 @@ void DrawStrategyPage(const StrategyTemplate& strategyTemplate) {
     StrategySession& session = SessionForTemplate(strategyTemplate);
 
     ImGui::TextUnformatted(session.strategy.name.c_str());
+    ImGui::SameLine();
+    if (ImGui::Button("Reset to Template Defaults")) {
+        session.strategy = MakeStrategyInstance(strategyTemplate);
+    }
     ImGui::Separator();
     ImGui::Spacing();
 

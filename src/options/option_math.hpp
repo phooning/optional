@@ -25,6 +25,42 @@ double BlackScholesPut(
     double dividendYield
 );
 
+double BlackScholesCallDelta(
+    double spot,
+    double strike,
+    double yearsToExpiry,
+    double volatility,
+    double riskFreeRate,
+    double dividendYield
+);
+
+double BlackScholesPutDelta(
+    double spot,
+    double strike,
+    double yearsToExpiry,
+    double volatility,
+    double riskFreeRate,
+    double dividendYield
+);
+
+double BlackScholesCallTheta(
+    double spot,
+    double strike,
+    double yearsToExpiry,
+    double volatility,
+    double riskFreeRate,
+    double dividendYield
+);
+
+double BlackScholesPutTheta(
+    double spot,
+    double strike,
+    double yearsToExpiry,
+    double volatility,
+    double riskFreeRate,
+    double dividendYield
+);
+
 double OptionIntrinsicValue(OptionType type, double spot, double strike);
 
 double OptionTheoreticalValue(

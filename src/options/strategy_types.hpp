@@ -55,6 +55,8 @@ struct StrategyLeg {
     bool enabled = true;
     bool useCurrentMarketPremium = false;
     double currentMarketPremium = 0.0;
+    double delta = 0.0;
+    double theta = 0.0;
 };
 
 struct StrategyTemplate {
@@ -94,6 +96,9 @@ struct StrategyResult {
     std::optional<double> currentMarketValue;
     std::optional<double> markToMarketPL;
     std::optional<double> modelEdge;
+    double delta = 0.0;
+    double theta = 0.0;
+    std::vector<StrategyLeg> evaluatedLegs;
 };
 
 StrategyLeg OptionLeg(PositionSide side, OptionType type, int quantity, double strike, double premium, int daysToExpiry);

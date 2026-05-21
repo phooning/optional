@@ -12,6 +12,7 @@ namespace {
 
 constexpr int kCurvePointCount = 240;
 constexpr double kSlopeEpsilon = 0.000001;
+constexpr double kCalendarDaysPerYear = 365.0;
 
 double SideMultiplier(PositionSide side) {
     return side == PositionSide::Long ? 1.0 : -1.0;
@@ -131,6 +132,37 @@ double EvaluateStrategyIntrinsicValueAtSpot(const StrategyInstance& strategy, do
     }
 
     return value;
+}
+
+void PopulateLegGreeks(StrategyLeg& leg, const MarketInputs& market) {
+    leg.delta = 0.0;
+    leg.theta = 0.0;
+    if (!leg.enabled) {
+        return;
+    }
+
+    const double side = SideMultiplier(leg.side);
+    if (leg.instrumentType == InstrumentType::Stock) {
+        leg.delta = side * static_cast<double>(std::max(0, leg.quantity));
+        return;
+    }
+
+    const double yearsToExpiry = YearsToExpiryFromCalendarDays(static_cast<double>(leg.daysToExpiry));
+    const double volatility = std::max(0.0, market.impliedVolatilityPercent) / 100.0;
+    const double riskFreeRate = market.riskFreeRatePercent / 100.0;
+    const double dividendYield = std::max(0.0, market.dividendYieldPercent) / 100.0;
+    const double multiplier = LegContractMultiplier(leg, market.sharesPerContract);
+    const bool isCall = leg.optionType == OptionType::Call;
+
+    const double optionDelta = isCall ?
+        BlackScholesCallDelta(market.underlyingPrice, leg.strike, yearsToExpiry, volatility, riskFreeRate, dividendYield) :
+        BlackScholesPutDelta(market.underlyingPrice, leg.strike, yearsToExpiry, volatility, riskFreeRate, dividendYield);
+    const double annualTheta = isCall ?
+        BlackScholesCallTheta(market.underlyingPrice, leg.strike, yearsToExpiry, volatility, riskFreeRate, dividendYield) :
+        BlackScholesPutTheta(market.underlyingPrice, leg.strike, yearsToExpiry, volatility, riskFreeRate, dividendYield);
+
+    leg.delta = side * optionDelta * multiplier;
+    leg.theta = side * (annualTheta / kCalendarDaysPerYear) * multiplier;
 }
 
 double EvaluateUpsideSlope(const StrategyInstance& strategy, int sharesPerContract) {
@@ -270,6 +302,12 @@ double EvaluateLegTheoreticalValue(const StrategyLeg& leg, double spot, const Ma
 StrategyResult EvaluateStrategy(const StrategyInstance& strategy, const MarketInputs& market) {
     StrategyResult result;
     const double xMax = PlotUpperBound(strategy, market);
+    result.evaluatedLegs = strategy.legs;
+    for (StrategyLeg& leg : result.evaluatedLegs) {
+        PopulateLegGreeks(leg, market);
+        result.delta += leg.delta;
+        result.theta += leg.theta;
+    }
 
     result.netEntryCost = EvaluateStrategyEntryCost(strategy, market.sharesPerContract);
     result.currentTheoreticalValue = EvaluateStrategyTheoreticalValueAtSpot(strategy, market.underlyingPrice, market);

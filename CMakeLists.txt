@@ -20,6 +20,7 @@ hello_imgui_add_app(optional
     src/options/strategy_registry.cpp
     src/options/strategy_types.cpp
     src/options/strategy_ui.cpp
+    src/options/utils.cpp
     src/window.cpp
 )
 

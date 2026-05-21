@@ -103,7 +103,7 @@ const std::vector<StrategyTemplate>& Registry() {
         },
         {
             "Protective Put",
-            StrategyCategory::CreditSpreads,
+            StrategyCategory::Other,
             {
                 StockLeg(PositionSide::Long, 100, 100.0),
                 OptionLeg(PositionSide::Long, OptionType::Put, 1, 95.0, 2.75, 30)
